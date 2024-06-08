@@ -57,8 +57,8 @@ fn main() -> Result<(), ureq::Error> {
     }
 
     let credentials = get_credentials_from_env()
-        .or_else(|| get_credentials_from_profile())
-        .or_else(|| get_credentials_from_meta_data());
+        .or_else(get_credentials_from_profile)
+        .or_else(get_credentials_from_meta_data);
 
     // let credentials = get_credentials_from_meta_data();
     // println!("credentials: {:?}", credentials);
@@ -103,7 +103,7 @@ fn main() -> Result<(), ureq::Error> {
     // println!("{}", date_iso);
     // println!("{}", now_utc.timestamp_millis());
 
-    let payload_hash = get_sha256(&body);
+    let payload_hash = get_sha256(body);
 
     let content_length = body.len().to_string();
 
@@ -130,7 +130,7 @@ fn main() -> Result<(), ureq::Error> {
     // if body.len() != 0 {
     //     headers.push(("content-length".to_string(), body.len().to_string()));
     // }
-    headers.sort_by(|(a, _), (b, _)| { a.cmp(&b) });
+    headers.sort_by(|(a, _), (b, _)| { a.cmp(b) });
 
     // println!("{:?}", headers);
 
@@ -169,7 +169,7 @@ fn main() -> Result<(), ureq::Error> {
         for header_name in response.headers_names().iter() {
             println!("{header_name}: {}", response.header(header_name).unwrap());
         }
-        println!("");
+        println!();
     }
 
     if let Some(content_type) = response.header("content-type") {
@@ -347,7 +347,7 @@ struct SecurityCredentials {
 fn get_credentials_from_meta_data() -> Option<Credentials> {
     return match get_meta_data("/iam/security-credentials") {
         Ok(role) => {
-            let role = role.split_once("\n").map(|(it, _)| it).unwrap_or_else(|| role.as_str());
+            let role = role.split_once('\n').map(|(it, _)| it).unwrap_or_else(|| role.as_str());
             let path = format!("/iam/security-credentials/{role}");
             match get_meta_data(path.as_str()) {
                 Ok(json) => {
@@ -384,10 +384,10 @@ fn get_credentials_from_profile() -> Option<Credentials> {
                     continue;
                 }
 
-                if line.starts_with("[") {
+                if line.starts_with('[') {
                     is_selected_profile = line.eq("[default]");
                 } else if is_selected_profile {
-                    let (key, value) = line.split_once("=").unwrap();
+                    let (key, value) = line.split_once('=').unwrap();
                     match key.trim() {
                         "aws_access_key_id" => { key_id = Some(value.trim().to_string()) }
                         "aws_secret_access_key" => { secret = Some(value.trim().to_string()) }
@@ -400,7 +400,7 @@ fn get_credentials_from_profile() -> Option<Credentials> {
                 Some(Credentials {
                     key_id: key_id.unwrap(),
                     secret: secret.unwrap(),
-                    region: region,
+                    region,
                     token: None,
                 })
             } else {
