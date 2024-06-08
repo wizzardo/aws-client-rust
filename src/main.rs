@@ -6,7 +6,7 @@ use ureq::{Error, Response};
 use sha2::{Sha256, Digest};
 use xmltree::{Element, EmitterConfig};
 
-fn main() -> Result<(), ureq::Error> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let mut region: Option<&str> = None;
@@ -134,7 +134,7 @@ fn main() -> Result<(), ureq::Error> {
 
     // println!("{:?}", headers);
 
-    let canonical_request = build_canonical_request(request.method(), path, payload_hash.as_str(), &headers, &vec![]);
+    let canonical_request = build_canonical_request(request.method(), path, payload_hash.as_str(), headers.as_slice(), &[]);
     if debug {
         println!("{}", std::str::from_utf8(canonical_request.as_slice()).unwrap());
     }
@@ -196,7 +196,7 @@ fn main() -> Result<(), ureq::Error> {
     Ok(())
 }
 
-fn get_meta_data(path: &str) -> Result<String, Error> {
+fn get_meta_data(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let url = format!("http://169.254.169.254/latest/meta-data{path}");
     let response = ureq::get(url.as_str()).call();
 
@@ -214,11 +214,11 @@ fn get_meta_data(path: &str) -> Result<String, Error> {
                     let body = response.into_string()?;
                     Ok(body)
                 } else {
-                    Err(Error::from(r))
+                    Err(Box::new(Error::from(r)))
                 }
             }
             Error::Transport(e) => {
-                Err(Error::from(e))
+                Err(Box::new(Error::from(e)))
             }
         }
     } else {
@@ -240,7 +240,7 @@ fn get_signature_key(secret: &str, date_short: &str, region: &str, service: &str
     vec
 }
 
-fn build_canonical_request(method: &str, path: &str, payload_hash: &str, headers: &Vec<(String, String)>, params: &Vec<(String, String)>) -> Vec<u8> {
+fn build_canonical_request(method: &str, path: &str, payload_hash: &str, headers: &[(String, String)], params: &[(String, String)]) -> Vec<u8> {
     let mut builder: Vec<u8> = Vec::with_capacity(1024);
     builder.extend_from_slice(method.as_bytes());
     builder.push(b'\n');
@@ -396,10 +396,10 @@ fn get_credentials_from_profile() -> Option<Credentials> {
                     }
                 }
             }
-            if key_id.is_some() && secret.is_some() {
+            if let (Some(key_id), Some(secret)) = (key_id, secret) {
                 Some(Credentials {
-                    key_id: key_id.unwrap(),
-                    secret: secret.unwrap(),
+                    key_id,
+                    secret,
                     region,
                     token: None,
                 })
