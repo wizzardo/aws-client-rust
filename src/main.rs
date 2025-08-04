@@ -2,9 +2,64 @@ use std::{env, fs};
 use chrono::{DateTime, Local, Utc};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
-use ureq::{Error, Response};
+use ureq::{Body, Error, RequestBuilder};
 use sha2::{Sha256, Digest};
+use ureq::http::{Method, Response};
+use ureq::typestate::{WithBody, WithoutBody};
 use xmltree::{Element, EmitterConfig};
+
+
+enum HttpRequestBuilder {
+    WithBody(RequestBuilder<WithBody>),
+    WithoutBody(RequestBuilder<WithoutBody>),
+}
+
+
+impl HttpRequestBuilder {
+    pub(crate) fn header(mut self, key: &str, value: &str) -> Self {
+        match self {
+            HttpRequestBuilder::WithBody(it) => { HttpRequestBuilder::WithBody(it.header(key, value)) }
+            HttpRequestBuilder::WithoutBody(it) => { HttpRequestBuilder::WithoutBody(it.header(key, value)) }
+        }
+    }
+    pub(crate) fn method(&self) -> &str {
+        let method = match &self {
+            HttpRequestBuilder::WithBody(it) => { it.method_ref() }
+            HttpRequestBuilder::WithoutBody(it) => { it.method_ref() }
+        };
+        let method = method.expect("cannot get method");
+        match *method {
+            Method::GET => { "GET" }
+            Method::POST => { "POST" }
+            Method::PUT => { "PUT" }
+            Method::DELETE => { "DELETE" }
+            Method::HEAD => { "HEAD" }
+            Method::OPTIONS => { "OPTIONS" }
+            Method::PATCH => { "PATCH" }
+            Method::TRACE => { "TRACE" }
+            Method::CONNECT => { "CONNECT" }
+            _ => { panic!("unknown method"); }
+        }
+    }
+    pub(crate) fn headers(&self) -> Vec<(String, String)> {
+        let headers = match self {
+            HttpRequestBuilder::WithBody(it) => { it.headers_ref() }
+            HttpRequestBuilder::WithoutBody(it) => { it.headers_ref() }
+        };
+        let headers = headers.expect("cannot get headers");
+        headers.iter().map(|x| (x.0.to_string(), x.1.to_str().expect("cannot get header value").to_string())).collect()
+    }
+    pub(crate) fn send(self, body: &[u8]) -> Result<Response<Body>, Error> {
+        match self {
+            HttpRequestBuilder::WithBody(it) => {
+                it.send(body)
+            }
+            HttpRequestBuilder::WithoutBody(it) => {
+                it.call()
+            }
+        }
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -90,6 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let url = format!("https://{host}{path}");
+    // let url = format!("https://echo.free.beeceptor.com");
 
     let now: DateTime<Local> = Local::now();
     let now_utc: DateTime<Utc> = Utc::now();
@@ -107,24 +163,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let content_length = body.len().to_string();
 
-    let mut request = match body.len() {
-        0 => { ureq::get(url.as_str()) }
+    let mut request: HttpRequestBuilder = match body.len() {
+        0 => {
+            HttpRequestBuilder::WithoutBody(ureq::get(url.as_str()))
+        }
         _ => {
-            ureq::post(url.as_str())
-                .set("content-length", content_length.as_str())
-                .set("content-type", if body[0] == b'{' { "application/json" } else { "text/xml" })
+            HttpRequestBuilder::WithBody(ureq::post(url.as_str()))
+                .header("content-length", content_length.as_str())
+                .header("content-type", if body[0] == b'{' { "application/json" } else { "text/xml" })
         }
     }
-        .set("Date", date_long.as_str())
-        .set("x-amz-content-sha256", payload_hash.as_str())
-        .set("x-amz-date", date_iso.as_str())
+        .header("date", date_long.as_str())
+        .header("x-amz-content-sha256", payload_hash.as_str())
+        .header("x-amz-date", date_iso.as_str())
         ;
 
     if let Some(token) = &credentials.token {
-        request = request.set("x-amz-security-token", token.as_str())
+        request = request.header("x-amz-security-token", token.as_str())
     }
 
-    let mut headers: Vec<(String, String)> = request.header_names().iter().map(|key| (key.to_lowercase(), request.header(key).unwrap().to_string())).collect();
+    let mut headers: Vec<(String, String)> = request.headers();
 
     headers.push(("host".to_string(), host));
     // if body.len() != 0 {
@@ -157,74 +215,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = format!("AWS4-HMAC-SHA256 Credential={key_id}/{date_short}/{region}/{service}/aws4_request,SignedHeaders={header_names},Signature={signature}");
     // println!("{}", result);
 
-    request = request.set("Authorization", result.as_str());
+    request = request.header("Authorization", result.as_str());
 
-    let response: Response = match request.method() {
-        "POST" => { request.send_bytes(body)? }
-        _ => { request.call()? }
-    };
-
-    if debug || response.status() >= 400 {
-        println!("status: {}", response.status());
-        for header_name in response.headers_names().iter() {
-            println!("{header_name}: {}", response.header(header_name).unwrap());
-        }
-        println!();
-    }
-
-    if let Some(content_type) = response.header("content-type") {
-        match content_type {
-            "text/xml" => {
-                let response_body = response.into_string()?;
-                let xml = reformat_xml(response_body.as_bytes());
-                println!("{}", std::str::from_utf8(xml.as_slice()).unwrap());
+    match request.send(body) {
+        Ok(mut response) => {
+            if debug || response.status().as_u16() >= 400 {
+                println!("status: {}", response.status());
+                for (header_name, value) in response.headers().iter() {
+                    println!("{header_name}: {}", value.to_str().unwrap());
+                }
+                println!();
             }
-            _ => {
-                let response_body = response.into_string()?;
-                println!("{}", response_body);
+
+            if let Some(content_type) = response.headers().get("content-type") {
+                match content_type.to_str().unwrap() {
+                    "text/xml" => {
+                        let response_body = response.body_mut().read_to_string()?;
+                        let xml = reformat_xml(response_body.as_bytes());
+                        println!("{}", std::str::from_utf8(xml.as_slice()).unwrap());
+                    }
+                    _ => {
+                        let response_body = response.body_mut().read_to_string()?;
+                        println!("{}", response_body);
+                    }
+                }
             }
         }
+        Err(e) => {
+            println!("error: {}", e);
+        }
     }
-
-
-    // let body: String = ureq::get(url.as_str())
-    //     .call()?
-    //     .into_string()?;
-    //
-    // println!("{}", body);
 
     Ok(())
 }
 
 fn get_meta_data(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let url = format!("http://169.254.169.254/latest/meta-data{path}");
-    let response = ureq::get(url.as_str()).call();
-
-    if let Err(e) = response {
-        match e {
-            Error::Status(_, r) => {
-                if r.status() == 401 {
+    let mut response = match ureq::get(url.as_str()).call() {
+        Ok(it) => { it }
+        Err(e) => {
+            match e {
+                Error::StatusCode(401) => {
                     let token = ureq::put("http://169.254.169.254/latest/api/token")
-                        .set("X-aws-ec2-metadata-token-ttl-seconds", "60")
-                        .call()?
-                        .into_string()?;
-                    let response = ureq::get(url.as_str())
-                        .set("X-aws-ec2-metadata-token", token.as_str())
+                        .header("X-aws-ec2-metadata-token-ttl-seconds", "60")
+                        .send(&[0_u8; 0])?
+                        .body_mut().read_to_string()?;
+                    let mut response = ureq::get(url.as_str())
+                        .header("X-aws-ec2-metadata-token", token.as_str())
                         .call()?;
-                    let body = response.into_string()?;
-                    Ok(body)
-                } else {
-                    Err(Box::new(Error::from(r)))
+                    let body = response.body_mut().read_to_string()?;
+                    return Ok(body)
+                }
+                _ => {
+                    eprintln!("ureq::get error: {}", e);
+                    return Err(Box::new(e));
                 }
             }
-            Error::Transport(e) => {
-                Err(Box::new(Error::from(e)))
-            }
         }
-    } else {
-        let body = response?.into_string()?;
-        Ok(body)
-    }
+    };
+    let body = response.body_mut().read_to_string()?;
+    Ok(body)
 }
 
 fn get_signature_key(secret: &str, date_short: &str, region: &str, service: &str) -> Vec<u8> {
