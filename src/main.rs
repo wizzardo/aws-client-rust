@@ -16,7 +16,7 @@ enum HttpRequestBuilder {
 
 
 impl HttpRequestBuilder {
-    pub(crate) fn header(mut self, key: &str, value: &str) -> Self {
+    pub(crate) fn header(self, key: &str, value: &str) -> Self {
         match self {
             HttpRequestBuilder::WithBody(it) => { HttpRequestBuilder::WithBody(it.header(key, value)) }
             HttpRequestBuilder::WithoutBody(it) => { HttpRequestBuilder::WithoutBody(it.header(key, value)) }
