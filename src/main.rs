@@ -469,3 +469,22 @@ fn reformat_xml(data: &[u8]) -> Vec<u8> {
     el.write_with_config(&mut writer, cfg).expect("writexml");
     writer
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn test_sha256() {
+        let hash = get_sha256(b"hello");
+        assert_eq!(hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+    }
+
+    #[test]
+    fn test_hmac_sha256() {
+        let result = get_hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        let hex = result.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+
+        assert_eq!(hex, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+    }
+}
