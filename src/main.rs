@@ -440,6 +440,7 @@ fn get_credentials_from_profile() -> Option<Credentials> {
                     let (key, value) = line.split_once('=').unwrap();
                     match key.trim() {
                         "aws_access_key_id" => { key_id = Some(value.trim().to_string()) }
+                        "aws_token" => { /* not handled but added for completeness */ }
                         "aws_secret_access_key" => { secret = Some(value.trim().to_string()) }
                         "region" => { region = Some(value.trim().to_string()) }
                         _ => {}
@@ -486,5 +487,69 @@ mod tests {
         let hex = result.iter().map(|b| format!("{:02x}", b)).collect::<String>();
 
         assert_eq!(hex, "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+    }
+
+    #[test]
+    fn test_build_canonical_request_get() {
+        let method = "GET";
+        let path = "/test";
+        let payload_hash = "hash";
+        let headers = vec![("host".to_string(), "test.com".to_string())];
+        let params = vec![];
+        let result = build_canonical_request(method, path, payload_hash, &headers, &params);
+        let expected = r#"
+GET
+/test
+
+host:test.com
+
+host
+hash
+"#.trim();
+        assert_eq!(std::str::from_utf8(&result).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_build_canonical_request_with_params() {
+        let method = "GET";
+        let path = "/test";
+        let payload_hash = "hash";
+        let headers = vec![("host".to_string(), "test.com".to_string())];
+        let params = vec![("a".to_string(), "1".to_string()), ("b".to_string(), "2".to_string())];
+        let result = build_canonical_request(method, path, payload_hash, &headers, &params);
+        let expected = r#"
+GET
+/test
+a=1&b=2
+host:test.com
+
+host
+hash
+"#.trim();
+        assert_eq!(std::str::from_utf8(&result).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_build_canonical_request_with_headers_and_params() {
+        let method = "POST";
+        let path = "/test";
+        let payload_hash = "hash";
+        let headers = vec![
+            ("host".to_string(), "test.com".to_string()),
+            ("x-amz-date".to_string(), "date".to_string()),
+        ];
+        let params = vec![("a".to_string(), "1".to_string())];
+        let result = build_canonical_request(method, path, payload_hash, &headers, &params);
+        let expected = r#"
+POST
+/test
+a=1
+host:test.com
+x-amz-date:date
+
+host;x-amz-date
+hash
+"#.trim();
+        assert_eq!(std::str::from_utf8(&result).unwrap(), expected);
     }
 }
