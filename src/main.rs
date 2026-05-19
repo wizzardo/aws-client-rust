@@ -1,6 +1,6 @@
 use std::{env, fs};
 use chrono::{DateTime, Local, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, KeyInit};
 use serde::Deserialize;
 use ureq::{Body, Error, RequestBuilder};
 use sha2::{Sha256, Digest};
@@ -354,7 +354,7 @@ fn get_sha256(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     let result = hasher.finalize();
-    format!("{:x}", result)
+    result.iter().map(|byte| format!("{:02x}", byte)).collect()
 }
 
 fn get_hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
