@@ -1,4 +1,4 @@
-FROM rust:1.95-slim
+FROM rust:1.96-slim
 
 WORKDIR /app
 
